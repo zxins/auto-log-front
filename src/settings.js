@@ -1,5 +1,5 @@
 module.exports = {
-  title: '日志系统',
+  title: 'Auto log system',
 
   /**
    * @type {boolean} true | false
