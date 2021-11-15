@@ -2,41 +2,51 @@
   <div class="app-container">
     <div class="filter-container">
       <div class="filter-item time-container">
-        <label>日期：</label>
+        日期:
         <el-date-picker
           v-model="indexDate"
+          class="item-col"
           align="right"
           type="date"
           placeholder="选择日期"
           :picker-options="pickerOptions"
+          @change="handlerDateChange"
         />
       </div>
+      <div class="filter-item time-container">
+        过滤条件:
 
-      <el-select v-model="matchKey" placeholder="检索字段" clearable style="width: 120px" class="filter-item">
-        <el-option v-for="item in fields" :key="item" :label="item" :value="item"/>
-      </el-select>
-      <el-input
-        v-model="matchValue"
-        placeholder="请输入检索值"
-        style="width: 200px;"
-        class="filter-item"
-        @keyup.enter.native="handleFilter"
-      />
+        <el-select
+          v-model="matchKey"
+          class="item-col"
+          placeholder="检索字段"
+          clearable
+          style="width: 120px"
+        >
+          <el-option v-for="item in fieldsDropMenu" :key="item" :label="item" :value="item"/>
+        </el-select>
+        <el-input
+          v-model="matchValue"
+          class="item-col"
+          placeholder="请输入检索值"
+          style="width: 200px;"
+          clearable
+          @keyup.enter.native="handleFilter"
+        />
 
-      <!--      <div class="filter-item time-container">-->
-      <!--        <label>时间段：</label>-->
-      <!--        <el-time-picker-->
-      <!--          v-model="timeFrom"-->
-      <!--          :picker-options="{ selectableRange: '00:00:00 - 23:59:59' }"-->
-      <!--          placeholder="任意时间点"-->
-      <!--        />-->
-      <!--        &nbsp;-->
-      <!--        <el-time-picker-->
-      <!--          v-model="timeTo"-->
-      <!--          :picker-options="pickerOptions"-->
-      <!--          placeholder="任意时间点"-->
-      <!--        />-->
-      <!--      </div>-->
+        <el-time-picker
+          v-model="timeGte"
+          class="item-col"
+          placeholder="时间范围(≥)"
+        />
+        <el-time-picker
+          v-model="timeLte"
+          class="item-col"
+          placeholder="时间范围(≤)"
+        />
+      </div>
+      <!--    </div>-->
+      <!--    <div class="filter-container">-->
 
       <el-button
         v-waves
@@ -49,8 +59,8 @@
       </el-button>
     </div>
     <div class="filter-container">
-      <el-checkbox-group v-model="colNames">
-        <el-checkbox v-for="row in temp.colNames" :key="row" :label="row">
+      <el-checkbox-group v-model="checkboxVal">
+        <el-checkbox v-for="row in formThead" :key="row" :label="row">
           {{ row }}
         </el-checkbox>
       </el-checkbox-group>
@@ -76,9 +86,7 @@
 
 <script>
 import { fetchFields, fetchHits } from '@/api/log'
-import { fetchPv, createArticle, updateArticle } from '@/api/article'
 import waves from '@/directive/waves' // waves directive
-import { parseTime } from '@/utils'
 import Pagination from '@/components/Pagination' // secondary package based on el-pagination
 import moment from 'moment'
 
@@ -98,12 +106,7 @@ export default {
   },
   data() {
     return {
-      query: {
-        time: moment().startOf(`day`),
-        matchKey: '',
-        matchValue: undefined
-      },
-      indexDate: moment().startOf(`day`),
+      indexDate: '2021-11-13', // moment().startOf(`day`),
       pickerOptions: {
         disabledDate(time) {
           return time.getTime() > Date.now()
@@ -130,56 +133,39 @@ export default {
         }]
       },
       matchKey: '',
-      matchValue: undefined,
-      timeFrom: undefined,
-      timeTo: undefined,
+      matchValue: '',
       colNames: [],
       tableData: [],
-      tableKey: 0,
-      list: null,
+      tableKey: 1,
       total: 0,
       listLoading: true,
       listQuery: {
         page: 1,
-        perPage: 10
+        perPage: 50
       },
       listBody: {
-        match: {}
+        must: [],
+        range: {
+          '@timestamp': {}
+        }
       },
-      fields: [],
+      timeGte: '',
+      timeLte: '',
+      fieldsDropMenu: [], // 筛选条件下拉菜单
+      formTheadOptions: [], // 表头选项
+      checkboxVal: [], // checkboxVal 勾选框
+      formThead: [], // 默认表头 Default header
+
       temp: {
         colNames: [],
-        id: undefined,
-        importance: 1,
-        remark: '',
-        timestamp: new Date(),
-        title: '',
-        type: '',
-        status: 'published'
-      },
-      dialogFormVisible: false,
-      dialogStatus: '',
-      textMap: {
-        update: 'Edit',
-        create: 'Create'
-      },
-      dialogPvVisible: false,
-      pvData: [],
-      rules: {
-        type: [{ required: true, message: 'type is required', trigger: 'change' }],
-        timestamp: [{ type: 'date', required: true, message: 'timestamp is required', trigger: 'change' }],
-        title: [{ required: true, message: 'title is required', trigger: 'blur' }]
-      },
-      downloadLoading: false
+        fields: []
+      }
     }
   },
   watch: {
-    matchKey: function(val) {
-      this.listBody.match = {}
-      this.listBody.match[val] = this.matchValue
-    },
-    matchValue: function(val) {
-      this.listBody.match[this.matchKey] = val
+    checkboxVal(valArr) {
+      this.colNames = this.formTheadOptions.filter(i => valArr.indexOf(i) >= 0)
+      this.tableKey = this.tableKey + 1// 为了保证table 每次都会重渲 In order to ensure the table will be re-rendered each time
     }
   },
   created() {
@@ -187,155 +173,97 @@ export default {
     this.getList()
   },
   methods: {
+    requestDateStr() {
+      return moment(this.indexDate).format('yyyyMMDD')
+    },
+    requestBodyMatch() {
+      this.listBody.must = []
+      if (this.matchKey !== '' && this.matchValue !== '') {
+        this.listBody.must.push([this.matchKey, this.matchValue])
+      }
+    },
+    requestBodyRange() {
+      if (this.timeGte !== '') {
+        const date = moment(this.indexDate).format('yyyy-MM-DD')
+        const time = moment(this.timeGte).format('HH:mm:ss')
+        const datetime = date + ' ' + time
+        this.listBody.range['@timestamp'].gte = moment(datetime).utc().valueOf() // @timestamp为UTC时间
+      }
+      if (this.timeLte !== '') {
+        const date = moment(this.indexDate).format('yyyy-MM-DD')
+        const time = moment(this.timeLte).format('HH:mm:ss')
+        const datetime = date + ' ' + time
+        this.listBody.range['@timestamp'].lte = moment(datetime).utc().valueOf()
+      }
+    },
     getFields() {
       this.listLoading = true
-      const dateStr = moment(this.indexDate).format('yyyyMMDD')
+      const dateStr = this.requestDateStr()
       fetchFields(dateStr).then(res => {
         const result = res.r
+        //  筛选条件下拉菜单
         const fields = []
         for (const k in result) {
-          if (!k.startsWith('@')) {
+          if (!k.startsWith('@ver')) { // 要不要过滤掉所有@开头的？
             fields.push(k)
           }
         }
         fields.sort()
-        this.fields = fields
+        this.fieldsDropMenu = JSON.parse(JSON.stringify(fields))
+        // 字段筛选下拉菜单，去除时间选项
+        const indexOfAtTimeStamp = this.fieldsDropMenu.indexOf('@timestamp')
+        indexOfAtTimeStamp !== -1 ? this.fieldsDropMenu.splice(indexOfAtTimeStamp, 1) : {}
+        const indexOfTimeStamp = this.fieldsDropMenu.indexOf('timestamp')
+        indexOfTimeStamp !== -1 ? this.fieldsDropMenu.splice(indexOfTimeStamp, 1) : {}
+
+        // 固定表头筛选
+        this.checkboxVal = JSON.parse(JSON.stringify(fields))
+        this.formThead = JSON.parse(JSON.stringify(fields))
+        this.formTheadOptions = JSON.parse(JSON.stringify(fields))
+
+        // loading结束
         this.listLoading = false
       })
     },
     getList() {
       this.listLoading = true
+      // URL参数
       const dateStr = moment(this.indexDate).format('yyyyMMDD')
+      // post body - match
+      this.requestBodyMatch()
+      // post body - range 目前只算日期范围
+      this.requestBodyRange()
       fetchHits(dateStr, this.listQuery, this.listBody).then(res => {
         const items = res.r.items
         const tableData = []
         items.forEach((item) => {
+          if (Object.hasOwn(item._source, '@timestamp')) {
+            item._source['@timestamp'] = moment(item._source['@timestamp']).format('yyyy-MM-DD HH:mm:ss')
+          }
+          if (Object.hasOwn(item._source, 'timestamp')) {
+            item._source.timestamp = moment(item._source['timestamp']).format('yyyy-MM-DD HH:mm:ss')
+          }
           tableData.push(item._source)
         })
         this.tableData = tableData
-        this.colNames = this.fields
-        this.temp.colNames = JSON.parse(JSON.stringify(this.colNames))
+        this.colNames = this.formThead
+        // this.colNames.sort()
+        // this.temp.colNames = JSON.parse(JSON.stringify(this.colNames))
         this.total = res.r.totalCount
         this.listLoading = false
+        if (res.r.items.length === 0) {
+          this.$message.info('当前检索条件无数据')
+        }
       })
     },
     handleFilter() {
       this.listQuery.page = 1
+      this.getFields()
       this.getList()
     },
-    handleModifyStatus(row, status) {
-      this.$message({
-        message: '操作成功',
-        type: 'success'
-      })
-      row.status = status
-    },
-    sortChange(data) {
-      const { prop, order } = data
-      if (prop === 'id') {
-        this.sortByID(order)
-      }
-    },
-    sortByID(order) {
-      if (order === 'ascending') {
-        this.listQuery.sort = '+id'
-      } else {
-        this.listQuery.sort = '-id'
-      }
+    handlerDateChange(date) {
+      // console.log(date)
       this.handleFilter()
-    },
-    resetTemp() {
-      this.temp = {
-        id: undefined,
-        importance: 1,
-        remark: '',
-        timestamp: new Date(),
-        title: '',
-        status: 'published',
-        type: ''
-      }
-    },
-    handleCreate() {
-      this.resetTemp()
-      this.dialogStatus = 'create'
-      this.dialogFormVisible = true
-      this.$nextTick(() => {
-        this.$refs['dataForm'].clearValidate()
-      })
-    },
-    createData() {
-      this.$refs['dataForm'].validate((valid) => {
-        if (valid) {
-          this.temp.id = parseInt(Math.random() * 100) + 1024 // mock a id
-          this.temp.author = 'vue-element-admin'
-          createArticle(this.temp).then(() => {
-            this.list.unshift(this.temp)
-            this.dialogFormVisible = false
-            this.$notify({
-              title: '成功',
-              message: '创建成功',
-              type: 'success',
-              duration: 2000
-            })
-          })
-        }
-      })
-    },
-    handleUpdate(row) {
-      this.temp = Object.assign({}, row) // copy obj
-      this.temp.timestamp = new Date(this.temp.timestamp)
-      this.dialogStatus = 'update'
-      this.dialogFormVisible = true
-      this.$nextTick(() => {
-        this.$refs['dataForm'].clearValidate()
-      })
-    },
-    updateData() {
-      this.$refs['dataForm'].validate((valid) => {
-        if (valid) {
-          const tempData = Object.assign({}, this.temp)
-          tempData.timestamp = +new Date(tempData.timestamp) // change Thu Nov 30 2017 16:41:05 GMT+0800 (CST) to 1512031311464
-          updateArticle(tempData).then(() => {
-            const index = this.list.findIndex(v => v.id === this.temp.id)
-            this.list.splice(index, 1, this.temp)
-            this.dialogFormVisible = false
-            this.$notify({
-              title: '成功',
-              message: '更新成功',
-              type: 'success',
-              duration: 2000
-            })
-          })
-        }
-      })
-    },
-    handleDelete(row, index) {
-      this.$notify({
-        title: '成功',
-        message: '删除成功',
-        type: 'success',
-        duration: 2000
-      })
-      this.list.splice(index, 1)
-    },
-    handleFetchPv(pv) {
-      fetchPv(pv).then(response => {
-        this.pvData = response.data.pvData
-        this.dialogPvVisible = true
-      })
-    },
-    formatJson(filterVal) {
-      return this.list.map(v => filterVal.map(j => {
-        if (j === 'timestamp') {
-          return parseTime(v[j])
-        } else {
-          return v[j]
-        }
-      }))
-    },
-    getSortClass: function(key) {
-      const sort = this.listQuery.sort
-      return sort === `+${key}` ? 'ascending' : 'descending'
     }
   }
 }
@@ -345,6 +273,10 @@ export default {
 .filter-container {
   .filter-item {
     margin-right: 5px;
+
+    .item-col {
+      margin-right: 5px;
+    }
 
     ::v-deep .el-date-editor {
       width: 150px;
